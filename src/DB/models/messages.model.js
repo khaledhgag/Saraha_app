@@ -1,0 +1,25 @@
+import mongoose from "mongoose";
+
+const messageSchema = new mongoose.Schema(
+    {
+        content: {
+            type: String,
+            required: true,
+            trim: true,
+            minLength: 1,
+            maxLength: 2000,
+        },
+        receiverId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            required: true,
+        },
+    },
+    {
+        timestamps: true,
+    }
+);
+
+const messageModel = mongoose.model("Message", messageSchema);
+
+export default messageModel;
