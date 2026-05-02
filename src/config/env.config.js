@@ -29,8 +29,16 @@ const envconfig = {
         ACCESS_SECRET: process.env.JWT_ACCESS_SECRET
     },
     gcp:{
-    webClientid: process.env.GCP_CLIENT_ID
-}
+        webClientid: process.env.GCP_CLIENT_ID
+    },
+    mail: {
+        SERVICE: process.env.MAIL_SERVICE,
+        HOST: process.env.MAIL_HOST,
+        PORT: process.env.MAIL_PORT,
+        USER: process.env.MAIL_USER,
+        PASS: process.env.MAIL_PASS,
+        FROM: process.env.MAIL_FROM ?? process.env.MAIL_USER,
+    }
 };
 
 

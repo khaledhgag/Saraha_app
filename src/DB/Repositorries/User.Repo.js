@@ -6,8 +6,8 @@ export class UserRepo extends BaseRepo {
         super(user);
     }
 
-    findByEmail(email) {
-        return this.findOneDocument({ email });
+    findByEmail(email, extraFilter = {}) {
+        return this.findOneDocument({ email, ...extraFilter });
     }
 
     findPublicProfileById(id) {

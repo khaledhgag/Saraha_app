@@ -1,4 +1,5 @@
-import { userRepo } from "../../DB/Repositorries/Index.js";
+import crypto from "node:crypto";
+import { revokedTokenRepo, userRepo } from "../../DB/Repositorries/Index.js";
 import {OAuth2Client}  from "google-auth-library";
 import { AppError } from "../../common/error/app.error.js";
 import { hash, compare } from "../../common/security/hash.js";
@@ -6,6 +7,7 @@ import { encrypt } from "../../Utils/encryption.utils.js";
 import jwt from "jsonwebtoken";
 import envconfig from "../../config/env.config.js";
 import { prvidors } from "../../common/constants.js";
+import { sendRevokeTokenEmail } from "../../Utils/send.email.js";
 const jwtsecret = envconfig.JWT;
 const normalizeEmail = (email = "") => email.trim().toLowerCase();
 const gcp = envconfig.gcp;
@@ -41,7 +43,7 @@ export const register = async (data) => {
 
 export const login = async (data) => {
     const { email, password } = data;
-    const user = await userRepo.findByEmail(normalizeEmail(email), { provider: prvidors.System });
+    const user = await userRepo.findByEmail(normalizeEmail(email), { Provider: prvidors.System });
 
     if (!user) {
         throw new AppError("Invalid email or password", 400);
@@ -75,6 +77,10 @@ export const login = async (data) => {
 };
 
 const generateToken = (user) => {
+    if (!jwtsecret.ACCESS_SECRET) {
+        throw new AppError("JWT_ACCESS_SECRET is missing from environment variables", 500);
+    }
+
     const accessToken = jwt.sign(
         { userId: user._id, email: user.email },
         jwtsecret.ACCESS_SECRET,
@@ -113,7 +119,7 @@ export const gmailRegisterService = async (body) => {
         throw new AppError("Invalid Google token", 400);
     }
 
-    const user = await userRepo.findDocument({
+    const user = await userRepo.findOneDocument({
         $or: [
             { googlesub: payload.sub },
             { email: payload.email }
@@ -124,24 +130,20 @@ export const gmailRegisterService = async (body) => {
     let userData;
 
     if (user) {
-        userData = await userRepo.updateDocumentWithUpdateOne({
-            id: user._id,
-            data: {
-                firstName: payload.given_name,
-                lastName: payload.family_name,
-                email: payload.email,
-            },
-            Option: { new: true }
+        userData = await userRepo.findByIdAndUpdateDocument(user._id, {
+            firstName: payload.given_name,
+            lastName: payload.family_name,
+            email: normalizeEmail(payload.email),
         });
     } else {
-        const hashedPassword = await hash(
+        const hashedPassword = hash(
             crypto.randomBytes(16).toString("hex")
         );
 
         userData = await userRepo.createDocument({
             firstName: payload.given_name,
             lastName: payload.family_name,
-            email: payload.email,
+            email: normalizeEmail(payload.email),
             googlesub: payload.sub,
             Provider: prvidors.GOOGLE,
             password: hashedPassword,
@@ -165,7 +167,7 @@ export const gmailLoginService = async (body) => {
         throw new AppError("Invalid Google token", 400);
     }
 
-    const user = await userRepo.findDocument({
+    const user = await userRepo.findOneDocument({
         googlesub: payload.sub,
         Provider: prvidors.GOOGLE
     });
@@ -181,4 +183,56 @@ export const gmailLoginService = async (body) => {
         accessToken,
     };
 };
-    
+
+export const logoutService = async (user, token) => {
+    const decoded = jwt.verify(token, jwtsecret.ACCESS_SECRET);
+    const expiresAt = decoded.exp ? new Date(decoded.exp * 1000) : undefined;
+
+    await revokedTokenRepo.createDocument({
+        token,
+        userId: user.userId,
+        expiresAt,
+    });
+
+    const mailSent = await sendRevokeTokenEmail({
+        email: user.email,
+        userName: user.email,
+    });
+
+    return {
+        revoked: true,
+        mailSent,
+    };
+};
+
+export const revokeTokenByValueService = async (body) => {
+    const { token, email } = body;
+
+    if (!jwtsecret.ACCESS_SECRET) {
+        throw new AppError("JWT_ACCESS_SECRET is missing from environment variables", 500);
+    }
+
+    const decoded = jwt.verify(token, jwtsecret.ACCESS_SECRET);
+    const expiresAt = decoded.exp ? new Date(decoded.exp * 1000) : undefined;
+
+    const alreadyRevoked = await revokedTokenRepo.findOneDocument({ token });
+    if (!alreadyRevoked) {
+        await revokedTokenRepo.createDocument({
+            token,
+            userId: decoded.userId,
+            expiresAt,
+        });
+    }
+
+    const mailSent = email
+        ? await sendRevokeTokenEmail({
+              email,
+              userName: email,
+          })
+        : false;
+
+    return {
+        revoked: true,
+        mailSent,
+    };
+};

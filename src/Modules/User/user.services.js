@@ -2,9 +2,6 @@ import { messageRepo, userRepo } from "../../DB/Repositorries/Index.js";
 import { AppError } from "../../common/error/app.error.js";
 import { hash } from "../../common/security/hash.js";
 import { decrypt, encrypt } from "../../Utils/encryption.utils.js";
-import jwt from "jsonwebtoken";
-import envconfig from "../../config/env.config.js";
-const jwtsecret = envconfig.JWT;
 const normalizeEmail = (email = "") => email.trim().toLowerCase();
 
 const sanitizeUser = (user) => {
@@ -64,6 +61,12 @@ const ensureEmailIsUnique = async (email, userId = null) => {
     }
 };
 
+const ensureSameUser = (id, authUser) => {
+    if (id !== authUser.userId) {
+        throw new AppError("You can only access your own account", 403);
+    }
+};
+
 export const createUserService = async (data) => {
     await ensureEmailIsUnique(data.email);
 
@@ -82,19 +85,16 @@ export const getUsersService = async (query = {}) => {
     return users.map(sanitizeUser);
 };
 
-export const getUserByIdService = async (headers) => {
-    //get token from req 
-    const accessToken = headers.authorization;
+export const getUserByIdService = async (id, authUser) => {
+    ensureSameUser(id, authUser);
 
-    //verify token 
-
-   const decoded = jwt.verify(accessToken, jwtsecret.ACCESS_SECRET);
-    const user = await ensureUserExists(decoded.userId);
+    const user = await ensureUserExists(authUser.userId);
 
     return sanitizeUser(user);
 };
 
-export const updateUserService = async (id, data) => {
+export const updateUserService = async (id, data, authUser) => {
+    ensureSameUser(id, authUser);
     await ensureEmailIsUnique(data.email, id);
 
     const updatedUser = await userRepo.updateProfile(
@@ -109,7 +109,8 @@ export const updateUserService = async (id, data) => {
     return sanitizeUser(updatedUser);
 };
 
-export const deleteUserService = async (id) => {
+export const deleteUserService = async (id, authUser) => {
+    ensureSameUser(id, authUser);
     const deletedUser = await userRepo.deleteAccount(id);
 
     if (!deletedUser) {
@@ -123,7 +124,8 @@ export const deleteUserService = async (id) => {
     return { message: "User deleted successfully" };
 };
 
-export const getUserMessagesService = async (userId, query = {}) => {
+export const getUserMessagesService = async (userId, query = {}, authUser) => {
+    ensureSameUser(userId, authUser);
     await ensureUserExists(userId);
 
     const messages = await messageRepo.listUserMessages(userId);
